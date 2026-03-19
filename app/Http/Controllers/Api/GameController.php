@@ -9,7 +9,6 @@ use App\Models\Conversation;
 use App\Models\Game;
 use App\Models\Message;
 use App\Models\Room;
-use App\Models\Rule;
 use App\Models\RuleAction;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -265,7 +264,14 @@ class GameController extends Controller
         $user = auth()->user();
 
         $games = Game::where('user_id', $user->id)
-            ->with(['impostorCharacter', 'aiModel'])
+            ->with([
+                'impostorCharacter',
+                'aiModel',
+                'characterScenarios.character',
+                'characterScenarios.room',
+                'characterScenarios.rule',
+                'characterScenarios.action',
+            ])
             ->orderBy('created_at', 'desc')
             ->get();
 
@@ -291,6 +297,10 @@ class GameController extends Controller
                         'id' => $game->impostorCharacter->id,
                         'name' => $game->impostorCharacter->name,
                     ];
+                    $gameData['character_scenarios'] = $this->formatCharacterScenarios(
+                        $game->characterScenarios,
+                        $game->impostor_character_id
+                    );
                 }
 
                 return $gameData;
@@ -665,8 +675,15 @@ class GameController extends Controller
             'finished_at' => now(),
         ]);
 
-        // Load the characters for response
-        $game->load(['impostorCharacter', 'guessedCharacter']);
+        // Load the characters and scenarios for response
+        $game->load([
+            'impostorCharacter',
+            'guessedCharacter',
+            'characterScenarios.character',
+            'characterScenarios.room',
+            'characterScenarios.rule',
+            'characterScenarios.action',
+        ]);
 
         return response()->json([
             'success' => true,
@@ -685,8 +702,52 @@ class GameController extends Controller
             'game' => [
                 'id' => $game->id,
                 'finished_at' => $game->finished_at,
+                'character_scenarios' => $this->formatCharacterScenarios(
+                    $game->characterScenarios,
+                    $game->impostor_character_id
+                ),
             ],
         ]);
+    }
+
+    /**
+     * Format step-by-step scenarios for every character in a game.
+     */
+    private function formatCharacterScenarios($characterScenarios, int $impostorCharacterId)
+    {
+        return $characterScenarios
+            ->groupBy('character_id')
+            ->map(function ($scenarios) use ($impostorCharacterId) {
+                $sortedScenarios = $scenarios->sortBy('step_order')->values();
+                $character = $sortedScenarios->first()->character;
+
+                return [
+                    'character' => [
+                        'id' => $character->id,
+                        'name' => $character->name,
+                        'is_impostor' => $character->id === $impostorCharacterId,
+                    ],
+                    'steps' => $sortedScenarios->map(function ($scenario) {
+                        return [
+                            'step_order' => $scenario->step_order,
+                            'room' => [
+                                'id' => $scenario->room->id,
+                                'name' => $scenario->room->name,
+                            ],
+                            'rule' => [
+                                'id' => $scenario->rule->id,
+                                'rule_text' => $scenario->rule->rule_text,
+                            ],
+                            'action' => [
+                                'id' => $scenario->action->id,
+                                'action_text' => $scenario->action->action_text,
+                                'is_violation' => $scenario->action->is_violation,
+                            ],
+                        ];
+                    })->values(),
+                ];
+            })
+            ->values();
     }
 
     /**
