@@ -418,6 +418,42 @@ class GameController extends Controller
     }
 
     /**
+     * Delete a game by ID.
+     *
+     * Responses:
+     * - 200 if deleted successfully
+     * - 404 if game does not exist
+     * - 403 if game exists but does not belong to authenticated user
+     */
+    public function destroy(int $gameId): JsonResponse
+    {
+        $user = auth()->user();
+
+        $game = Game::find($gameId);
+
+        if (!$game) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Game not found.',
+            ], 404);
+        }
+
+        if ((int) $game->user_id !== (int) $user->id) {
+            return response()->json([
+                'success' => false,
+                'message' => 'You are not authorized to delete this game.',
+            ], 403);
+        }
+
+        $game->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Game deleted successfully.',
+        ], 200);
+    }
+
+    /**
      * Send a message to a character in a game and get AI response.
      * 
      * Limits: 3 messages per character per game.
