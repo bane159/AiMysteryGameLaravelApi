@@ -2,7 +2,6 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\GameController;
-use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
 // Public routes
@@ -18,6 +17,7 @@ Route::middleware('auth:api')->group(function () {
     Route::post('/refresh', [AuthController::class, 'refresh']);
 
     // Game routes
+    Route::get('/games/options', [GameController::class, 'options']);
     Route::get('/games', [GameController::class, 'index']);
     Route::post('/games/start', [GameController::class, 'start']);
     Route::get('/games/{gameId}', [GameController::class, 'show']);

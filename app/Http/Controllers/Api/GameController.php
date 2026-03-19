@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Models\AiModel;
 use App\Models\Character;
 use App\Models\CharacterScenario;
 use App\Models\Conversation;
@@ -17,6 +18,40 @@ use Illuminate\Support\Facades\Http;
 
 class GameController extends Controller
 {
+    /**
+     * Get supported game options for UI rendering.
+     */
+    public function options(): JsonResponse
+    {
+        $aiModels = AiModel::query()
+            ->orderBy('name')
+            ->get(['id', 'name'])
+            ->map(function ($model) {
+                return [
+                    'value' => $model->id,
+                    'text' => $model->name,
+                ];
+            })
+            ->values();
+
+        $difficulties = collect(Game::DIFFICULTIES)
+            ->map(function ($difficulty) {
+                return [
+                    'value' => $difficulty,
+                    'text' => $difficulty,
+                ];
+            })
+            ->values();
+
+        return response()->json([
+            'success' => true,
+            'options' => [
+                'ai_models' => $aiModels,
+                'difficulties' => $difficulties,
+            ],
+        ]);
+    }
+
     /**
      * Start a new game.
      * 
@@ -34,25 +69,38 @@ class GameController extends Controller
      */
     public function start(Request $request): JsonResponse
     {
+        $difficulty = ucfirst(strtolower((string) $request->input('difficulty')));
+        $request->merge(['difficulty' => $difficulty]);
+
+        $request->validate([
+            'ai_model_id' => 'required|integer|exists:ai_models,id',
+            'difficulty' => 'required|string|in:Easy,Normal,Hard',
+        ]);
+
         try {
             DB::beginTransaction();
 
             // Get the authenticated user
             $user = auth()->user();
 
-            // For now, use AI model ID 1 (gpt-oss-20b), later this will come from frontend
-            $aiModelId = $request->input('ai_model_id', 1);
+            $aiModelId = (int) $request->input('ai_model_id');
+            $difficulty = (string) $request->input('difficulty');
+            $difficultyConfig = $this->getDifficultyConfig($difficulty);
 
-            // Step 1: Pick 2-4 random characters
-            $characterCount = rand(2, 4);
-            $characters = Character::inRandomOrder()->limit($characterCount)->get();
+            // Step 1: Pick random characters based on difficulty
+            $availableCharacterCount = Character::count();
+            $minCharacters = $difficultyConfig['characters_min'];
+            $maxCharacters = min($difficultyConfig['characters_max'], $availableCharacterCount);
 
-            if ($characters->count() < 2) {
+            if ($availableCharacterCount < $minCharacters) {
                 return response()->json([
                     'success' => false,
-                    'message' => 'Not enough characters in the database. Need at least 2 characters. CHANGE LATER',
+                    'message' => "Not enough characters for {$difficulty} difficulty. Need at least {$minCharacters}.",
                 ], 500);
             }
+
+            $characterCount = rand($minCharacters, $maxCharacters);
+            $characters = Character::inRandomOrder()->limit($characterCount)->get();
 
             // Step 2: Randomly choose one character to be the impostor
             $impostorCharacter = $characters->random();
@@ -61,16 +109,36 @@ class GameController extends Controller
             $game = Game::create([
                 'user_id' => $user->id,
                 'ai_model_id' => $aiModelId,
+                'difficulty' => $difficulty,
                 'impostor_character_id' => $impostorCharacter->id,
             ]);
 
-            // Step 4: For every room, pick 3 random rules and store them in game_rule table
+            // Step 4: For every room, pick random rules based on difficulty and store them in game_rule table
             $rooms = Room::with('rules')->get();
+
+            if ($rooms->isEmpty()) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'No rooms are available for game generation.',
+                ], 500);
+            }
+
+            $roomWithInsufficientRules = $rooms->first(function ($room) use ($difficultyConfig) {
+                return $room->rules->count() < $difficultyConfig['rules_per_room_min'];
+            });
+
+            if ($roomWithInsufficientRules) {
+                return response()->json([
+                    'success' => false,
+                    'message' => "Room '{$roomWithInsufficientRules->name}' does not have enough rules for {$difficulty} difficulty.",
+                ], 500);
+            }
+
             $gameRulesPerRoom = []; // Track which rules are assigned to each room for this game
 
             foreach ($rooms as $room) {
-                // Get 3 random rules for this room (or all if less than 3)
-                $roomRules = $room->rules()->inRandomOrder()->limit(3)->get();
+                $rulesPerRoom = rand($difficultyConfig['rules_per_room_min'], $difficultyConfig['rules_per_room_max']);
+                $roomRules = $room->rules()->inRandomOrder()->limit($rulesPerRoom)->get();
                 
                 foreach ($roomRules as $rule) {
                     // Attach rule to game via pivot table
@@ -81,14 +149,14 @@ class GameController extends Controller
                 $gameRulesPerRoom[$room->id] = $roomRules;
             }
 
-            // Step 5: Create character scenarios (3 steps per character)
+            // Step 5: Create character scenarios with steps based on difficulty
             $characterScenarios = [];
             $impostorHasViolated = false; // Track if impostor has already done their one violation
 
             foreach ($characters as $character) {
                 $isImpostor = $character->id === $impostorCharacter->id;
 
-                for ($stepOrder = 1; $stepOrder <= 3; $stepOrder++) {
+                for ($stepOrder = 1; $stepOrder <= $difficultyConfig['steps_per_character']; $stepOrder++) {
                     // Pick a random room that has rules assigned
                     $roomsWithRules = array_keys(array_filter($gameRulesPerRoom, fn($rules) => $rules->count() > 0));
                     
@@ -184,6 +252,7 @@ class GameController extends Controller
                         'name' => $game->aiModel->name,
                         'provider' => $game->aiModel->provider,
                     ],
+                    'difficulty' => $game->difficulty,
                     'characters' => $characters->map(function ($character) use ($impostorCharacter) {
                         return [
                             'id' => $character->id,
@@ -285,6 +354,7 @@ class GameController extends Controller
                     'created_at' => $game->created_at,
                     'finished_at' => $game->finished_at,
                     'is_finished' => $isFinished,
+                    'difficulty' => $game->difficulty,
                     'ai_model' => [
                         'id' => $game->aiModel->id,
                         'name' => $game->aiModel->name,
@@ -383,6 +453,7 @@ class GameController extends Controller
                     'id' => $conversation?->id,
                     'messages' => $messages,
                 ],
+                
             ];
         });
 
@@ -412,6 +483,7 @@ class GameController extends Controller
                 'created_at' => $game->created_at,
                 'finished_at' => $game->finished_at,
                 'is_finished' => $game->finished_at !== null,
+                'difficulty' => $game->difficulty,
                 'ai_model' => [
                     'id' => $game->aiModel->id,
                     'name' => $game->aiModel->name,
@@ -419,10 +491,17 @@ class GameController extends Controller
                 ],
                 'characters' => $charactersData,
                 'rooms_with_rules' => $roomsWithRules,
-                'impostor' => $game->impostorCharacter->name
-                
+               
             ],
         ];
+
+        if($game -> finished_at !== null) {
+            $response['impostor'] = $game->guessedCharacter->name;
+            $response['character_scenarios'] = $this->formatCharacterScenarios(
+                    $game->characterScenarios,
+                    $game->impostor_character_id
+                );
+        }
 
         return response()->json($response);
     }
@@ -546,10 +625,22 @@ class GameController extends Controller
             ->orderBy('step_order')
             ->get();
 
+        $allCharacterScenarios = CharacterScenario::where('game_id', $gameId)
+            ->with(['character', 'room', 'rule', 'action'])
+            ->orderBy('character_id')
+            ->orderBy('step_order')
+            ->get();
+
         $isImpostor = $game->impostor_character_id === $characterId;
 
         // Build system prompt
-        $systemPrompt = $this->buildSystemPrompt($character, $characterScenarios, $isImpostor, $game);
+        $systemPrompt = $this->buildSystemPrompt(
+            $character,
+            $characterScenarios,
+            $allCharacterScenarios,
+            $isImpostor,
+            $game
+        );
 
         // Get conversation history for context
         $conversationHistory = Message::where('conversation_id', $conversation->id)
@@ -751,10 +842,42 @@ class GameController extends Controller
     }
 
     /**
+     * Get generation parameters for a given difficulty.
+     */
+    private function getDifficultyConfig(string $difficulty): array
+    {
+        return match ($difficulty) {
+            Game::DIFFICULTY_EASY => [
+                'characters_min' => 2,
+                'characters_max' => 3,
+                'rules_per_room_min' => 2,
+                'rules_per_room_max' => 2,
+                'steps_per_character' => 2,
+            ],
+            Game::DIFFICULTY_HARD => [
+                'characters_min' => 4,
+                'characters_max' => 7,
+                'rules_per_room_min' => 5,
+                'rules_per_room_max' => 5,
+                'steps_per_character' => 5,
+            ],
+            default => [
+                'characters_min' => 3,
+                'characters_max' => 4,
+                'rules_per_room_min' => 3,
+                'rules_per_room_max' => 4,
+                'steps_per_character' => 3,
+            ],
+        };
+    }
+
+    /**
      * Build the system prompt for the AI character.
      */
-    private function buildSystemPrompt(Character $character, $scenarios, bool $isImpostor, Game $game): string
+    private function buildSystemPrompt(Character $character, $scenarios, $allCharacterScenarios, bool $isImpostor, Game $game): string
     {
+        $difficulty = (string) $game->difficulty;
+
         $prompt = "You are playing a character in a social deduction game similar to 'Among Us' or 'Werewolf'.\n\n";
         
         $prompt .= "=== YOUR CHARACTER ===";
@@ -765,6 +888,9 @@ class GameController extends Controller
         $prompt .= "\nThis is a detective-style game where players try to identify an impostor among characters.";
         $prompt .= "\nEach character visited rooms and performed actions. One character broke a rule (the impostor).";
         $prompt .= "\nThe player will interrogate you to figure out who the impostor is.\n\n";
+
+        $prompt .= "=== DIFFICULTY ===";
+        $prompt .= "\nCurrent difficulty: " . strtoupper($difficulty) . "\n";
 
         if ($isImpostor) {
             $prompt .= "=== SECRET: YOU ARE THE IMPOSTOR ===";
@@ -782,8 +908,29 @@ class GameController extends Controller
             $prompt .= "\n- Stay true to your personality\n\n";
         }
 
+        if ($difficulty === Game::DIFFICULTY_EASY) {
+            $prompt .= "=== EASY MODE BEHAVIOR ===";
+            $prompt .= "\n- Keep deception light; do not be too strategic";
+            $prompt .= "\n- Give noticeable hints that can help the player find the rule-breaking action";
+            $prompt .= "\n- You may mention other characters' behavior proactively if it helps the player";
+            $prompt .= "\n- If you are innocent, be openly cooperative\n\n";
+        } elseif ($difficulty === Game::DIFFICULTY_HARD) {
+            $prompt .= "=== HARD MODE BEHAVIOR ===";
+            $prompt .= "\n- Make your statements subtle, ambiguous, and hard to use as evidence";
+            $prompt .= "\n- Do NOT clearly hint about the rule-breaking action";
+            $prompt .= "\n- Mention other characters only if explicitly asked";
+            $prompt .= "\n- Even when mentioning others, keep hints very subtle";
+            $prompt .= "\n- If you are the impostor, prioritize misdirection while sounding calm and natural\n\n";
+        } else {
+            $prompt .= "=== NORMAL MODE BEHAVIOR ===";
+            $prompt .= "\n- Balance honesty and misdirection based on your role";
+            $prompt .= "\n- Do not provide obvious hints toward the rule-breaking action";
+            $prompt .= "\n- If asked about other characters, answer normally based on the scenario without over-hinting";
+            $prompt .= "\n- Keep responses believable and moderately challenging\n\n";
+        }
+
         $prompt .= "=== YOUR ACTIONS IN THE GAME ===";
-        $prompt .= "\nHere is exactly what you did during the game (3 time steps):\n";
+        $prompt .= "\nHere is exactly what you did during the game (time steps):\n";
         
         foreach ($scenarios as $scenario) {
             $prompt .= "\nStep {$scenario->step_order}:";
@@ -794,6 +941,23 @@ class GameController extends Controller
                 $prompt .= " [THIS VIOLATED THE RULE - HIDE THIS!]";
             }
             $prompt .= "\n";
+        }
+
+        $prompt .= "\n=== FULL GAME SCENARIO (ALL CHARACTERS) ===";
+        $scenariosByCharacter = $allCharacterScenarios->groupBy('character_id');
+        foreach ($scenariosByCharacter as $characterScenarios) {
+            $scenarioCharacter = $characterScenarios->first()->character;
+            $prompt .= "\n\nCharacter: {$scenarioCharacter->name}";
+
+            foreach ($characterScenarios->sortBy('step_order') as $scenario) {
+                $prompt .= "\n  Step {$scenario->step_order}:";
+                $prompt .= "\n    - Room: {$scenario->room->name}";
+                $prompt .= "\n    - Rule: \"{$scenario->rule->rule_text}\"";
+                $prompt .= "\n    - Action: \"{$scenario->action->action_text}\"";
+                if ($scenario->action->is_violation) {
+                    $prompt .= " [RULE VIOLATION]";
+                }
+            }
         }
 
         $prompt .= "\n=== RULES FOR ALL ROOMS IN THIS GAME ===";

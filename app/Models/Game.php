@@ -12,11 +12,22 @@ class Game extends Model
 {
     use HasFactory;
 
+    public const DIFFICULTY_EASY = 'Easy';
+    public const DIFFICULTY_NORMAL = 'Normal';
+    public const DIFFICULTY_HARD = 'Hard';
+
+    public const DIFFICULTIES = [
+        self::DIFFICULTY_EASY,
+        self::DIFFICULTY_NORMAL,
+        self::DIFFICULTY_HARD,
+    ];
+
     public $timestamps = false;
 
     protected $fillable = [
         'user_id',
         'ai_model_id',
+        'difficulty',
         'impostor_character_id',
         'guessed_character_id',
         'finished_at',
