@@ -105,8 +105,13 @@ class GameController extends Controller
             // Step 2: Randomly choose one character to be the impostor
             $impostorCharacter = $characters->random();
 
+            $nextGameNumber = ((int) Game::where('user_id', $user->id)
+                ->lockForUpdate()
+                ->max('game_number')) + 1;
+
             // Step 3: Create the game record
             $game = Game::create([
+                'game_number' => $nextGameNumber,
                 'user_id' => $user->id,
                 'ai_model_id' => $aiModelId,
                 'difficulty' => $difficulty,
@@ -242,6 +247,7 @@ class GameController extends Controller
                 'message' => 'Game started successfully',
                 'game' => [
                     'id' => $game->id,
+                    'number' => $game->game_number,
                     'created_at' => $game->created_at,
                     'user' => [
                         'id' => $game->user->id,
@@ -351,6 +357,7 @@ class GameController extends Controller
                 
                 $gameData = [
                     'id' => $game->id,
+                    'number' => $game->game_number,
                     'created_at' => $game->created_at,
                     'finished_at' => $game->finished_at,
                     'is_finished' => $isFinished,
@@ -480,6 +487,7 @@ class GameController extends Controller
             'success' => true,
             'game' => [
                 'id' => $game->id,
+                'number' => $game->game_number,
                 'created_at' => $game->created_at,
                 'finished_at' => $game->finished_at,
                 'is_finished' => $game->finished_at !== null,
@@ -792,6 +800,7 @@ class GameController extends Controller
             ],
             'game' => [
                 'id' => $game->id,
+                'number' => $game->game_number,
                 'finished_at' => $game->finished_at,
                 'character_scenarios' => $this->formatCharacterScenarios(
                     $game->characterScenarios,

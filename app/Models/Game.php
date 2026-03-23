@@ -25,6 +25,7 @@ class Game extends Model
     public $timestamps = false;
 
     protected $fillable = [
+        'game_number',
         'user_id',
         'ai_model_id',
         'difficulty',
