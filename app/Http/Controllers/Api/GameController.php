@@ -625,7 +625,7 @@ class GameController extends Controller
 
         // Get character info and scenarios for system prompt
         $character = Character::find($characterId);
-        $game->load(['impostorCharacter', 'rules.room']);
+        $game->load(['impostorCharacter', 'aiModel', 'rules.room']);
         
         $characterScenarios = CharacterScenario::where('game_id', $gameId)
             ->where('character_id', $characterId)
@@ -669,8 +669,11 @@ class GameController extends Controller
 
         try {
             // Call LMStudio API (OpenAI-compatible endpoint)
-            $response = Http::timeout(60)->post('http://localhost:1234/v1/chat/completions', [
-                'model' => 'openai/gpt-oss-20b',
+            $lmStudioUrl = env('LMSTUDIO_BASE_URL', 'http://localhost:1234');
+            $modelIdentifier = $game->aiModel->provider . '/' . $game->aiModel->name;
+
+            $response = Http::timeout(60)->post($lmStudioUrl . '/v1/chat/completions', [
+                'model' => $modelIdentifier,
                 'messages' => $messages,
                 'temperature' => 0.8,
                 'max_tokens' => 5000,

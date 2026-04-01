@@ -20,10 +20,10 @@ class AiModelsSeeder extends Seeder
                 'notes' => 'OpenAI GPT OSS 20B model, used for high-context applications',
             ],
             [
-                'name' => 'devstral-small-2505',
+                'name' => 'devstral-small-2507',
                 'provider' => 'mistralai',
                 'context_length' => 32000,
-                'notes' => 'Mistral AI Devstral Small 2505 model,    origi used for general-purpose tasks',
+                'notes' => 'Mistral AI Devstral Small 2507 model, used for general-purpose tasks',
             ],
         ];
 
