@@ -49,8 +49,15 @@ return new class extends Migration
      */
     public function down(): void
     {
+        // Must drop the FK first — MySQL uses the composite unique index as the
+        // backing index for the user_id FK, so it refuses to drop it directly.
         Schema::table('games', function (Blueprint $table) {
+            $table->dropForeign(['user_id']);
             $table->dropUnique('games_user_game_number_unique');
+        });
+
+        Schema::table('games', function (Blueprint $table) {
+            $table->foreign('user_id')->references('id')->on('users')->onDelete('cascade');
             $table->dropColumn('game_number');
         });
     }

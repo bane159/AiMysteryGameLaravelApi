@@ -565,7 +565,6 @@ class GameController extends Controller
         $user = auth()->user();
         $maxMessagesPerCharacter = 5;
 
-        // Find the game and verify ownership
         $game = Game::where('id', $gameId)
             ->where('user_id', $user->id)
             ->first();
@@ -577,7 +576,6 @@ class GameController extends Controller
             ], 404);
         }
 
-        // Check if game is already finished
         if ($game->finished_at !== null) {
             return response()->json([
                 'success' => false,
@@ -585,7 +583,6 @@ class GameController extends Controller
             ], 400);
         }
 
-        // Verify the character is part of this game
         $characterInGame = CharacterScenario::where('game_id', $gameId)
             ->where('character_id', $characterId)
             ->exists();
@@ -597,13 +594,11 @@ class GameController extends Controller
             ], 404);
         }
 
-        // Get or create conversation
         $conversation = Conversation::firstOrCreate([
             'game_id' => $gameId,
             'character_id' => $characterId,
         ]);
 
-        // Check message limit (5 user messages per character)
         $userMessageCount = Message::where('conversation_id', $conversation->id)
             ->where('sender', 'user')
             ->count();
@@ -671,8 +666,9 @@ class GameController extends Controller
             // Call LMStudio API (OpenAI-compatible endpoint)
             $lmStudioUrl = env('LMSTUDIO_BASE_URL', 'http://localhost:1234');
             $modelIdentifier = $game->aiModel->provider . '/' . $game->aiModel->name;
+            
 
-            $response = Http::timeout(60)->post($lmStudioUrl . '/v1/chat/completions', [
+            $response = Http::timeout(120)->post($lmStudioUrl . '/v1/chat/completions', [
                 'model' => $modelIdentifier,
                 'messages' => $messages,
                 'temperature' => 0.8,
@@ -722,12 +718,6 @@ class GameController extends Controller
             ], 500);
         }
     }
-
-    /**
-     * Submit a guess for who the impostor is.
-     * 
-     * Marks the game as finished and returns whether the guess was correct.
-     */
     public function guess(Request $request, int $gameId): JsonResponse
     {
         $request->validate([
