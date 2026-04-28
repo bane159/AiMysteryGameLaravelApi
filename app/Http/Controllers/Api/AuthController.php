@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\User;
+use App\Services\XpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
@@ -12,6 +13,7 @@ use Tymon\JWTAuth\Facades\JWTAuth;
 
 class AuthController extends Controller
 {
+    public function __construct(private readonly XpService $xpService) {}
     /**
      * Register a new user.
      */
@@ -42,6 +44,7 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'User registered successfully',
             'user' => $user,
+            'progress' => $this->xpService->progressSummary($user),
             'token' => $token,
         ], 201);
     }
@@ -78,6 +81,7 @@ class AuthController extends Controller
             'success' => true,
             'message' => 'Login successful',
             'user' => $user,
+            'progress' => $this->xpService->progressSummary($user),
             'token' => $token,
         ]);
     }
@@ -100,9 +104,12 @@ class AuthController extends Controller
      */
     public function me(): JsonResponse
     {
+        $user = auth('api')->user();
+
         return response()->json([
             'success' => true,
-            'user' => auth('api')->user()
+            'user' => $user,
+            'progress' => $this->xpService->progressSummary($user),
         ]);
     }
 

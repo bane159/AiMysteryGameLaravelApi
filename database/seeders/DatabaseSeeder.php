@@ -23,6 +23,7 @@ class DatabaseSeeder extends Seeder
         ]);
 
         $this->call([
+            LevelSeeder::class,
             AiModelsSeeder::class,
             RoomsAndRulesSeeder::class,
             CharactersSeeder::class,

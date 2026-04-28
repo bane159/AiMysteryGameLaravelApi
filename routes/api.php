@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\GameController;
+// use App\Http\Controllers\Api\UserController;
 use Illuminate\Support\Facades\Route;
 
 // Public routes
@@ -15,6 +16,9 @@ Route::middleware('auth:api')->group(function () {
     Route::put('/me', [AuthController::class, 'updateProfile']);
     Route::put('/me/password', [AuthController::class, 'changePassword']);
     Route::post('/refresh', [AuthController::class, 'refresh']);
+
+    // Profile & XP
+    // Route::get('/profile', [UserController::class, 'profile']);
 
     // Game routes
     Route::get('/games/options', [GameController::class, 'options']);

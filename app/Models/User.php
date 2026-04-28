@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Tymon\JWTAuth\Contracts\JWTSubject;
+use App\Models\XpTransaction;
 
 class User extends Authenticatable implements JWTSubject
 {
@@ -23,6 +24,8 @@ class User extends Authenticatable implements JWTSubject
         'name',
         'email',
         'password',
+        'xp',
+        'level',
     ];
 
     /**
@@ -74,5 +77,13 @@ class User extends Authenticatable implements JWTSubject
     public function games(): HasMany
     {
         return $this->hasMany(Game::class);
+    }
+
+    /**
+     * Get the XP transactions for this user.
+     */
+    public function xpTransactions(): HasMany
+    {
+        return $this->hasMany(XpTransaction::class);
     }
 }

@@ -11,6 +11,7 @@ use App\Models\Game;
 use App\Models\Message;
 use App\Models\Room;
 use App\Models\RuleAction;
+use App\Services\XpService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -618,6 +619,12 @@ class GameController extends Controller
         ]);
         $userMessage->refresh(); // Get the database-generated created_at
 
+        // Award XP for asking a question
+        $xpService = app(XpService::class);
+        $user->refresh(); // Ensure fresh xp/level values before modifying
+        $xpAwarded = $xpService->award($user, 'question', $game->id, $game->difficulty);
+        $user->refresh(); // Reload after XP update
+
         // Get character info and scenarios for system prompt
         $character = Character::find($characterId);
         $game->load(['impostorCharacter', 'aiModel', 'rules.room']);
@@ -708,6 +715,8 @@ class GameController extends Controller
                     'created_at' => $aiMessage->created_at,
                 ],
                 'messages_remaining' => $maxMessagesPerCharacter - ($userMessageCount + 1),
+                'xp_gained' => $xpAwarded,
+                'progress' => $xpService->progressSummary($user),
             ]);
 
         } catch (\Exception $e) {
@@ -767,6 +776,19 @@ class GameController extends Controller
             'finished_at' => now(),
         ]);
 
+        // Award XP for finishing the game
+        $xpService = app(XpService::class);
+        $user->refresh();
+        $xpAwarded = $xpService->award($user, 'game_complete', $game->id, $game->difficulty);
+        $user->refresh();
+
+        $bonusXp = 0;
+        if ($isCorrect) {
+            $bonusXp = $xpService->award($user, 'impostor_bonus', $game->id, $game->difficulty);
+            $user->refresh();
+            $xpAwarded += $bonusXp;
+        }
+
         // Load the characters and scenarios for response
         $game->load([
             'impostorCharacter',
@@ -800,6 +822,9 @@ class GameController extends Controller
                     $game->impostor_character_id
                 ),
             ],
+            'xp_gained' => $xpAwarded,
+            'bonus_xp' => $bonusXp,
+            'progress' => $xpService->progressSummary($user),
         ]);
     }
 
